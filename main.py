@@ -1,15 +1,13 @@
 from flask import Flask, request
 from flask_socketio import SocketIO, emit
 import cv2
+import numpy as np
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret!"
 socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000")
 
-
-@app.route("/")
-def hello():
-    return "Hello World!"
+client_processing_options = {}
 
 
 @socketio.on("connect")
@@ -20,41 +18,49 @@ def handle_connect():
 @socketio.on("disconnect")
 def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
+    if request.sid in client_processing_options:
+        del client_processing_options[request.sid]
 
 
-@socketio.on("video_stream")
-def video_stream():
-    # Start streaming video frames in a background task
-    socketio.start_background_task(target=stream_video, sid=request.sid)
+@socketio.on("start_processing")
+def handle_start_processing(data):
+    processing_type = data.get("processingType", "default")
+    client_processing_options[request.sid] = processing_type
+    print(f"Client {request.sid} requested processing type: {processing_type}")
 
 
-def stream_video(sid):
-    cap = cv2.VideoCapture(0)
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+@socketio.on("send_frame")
+def handle_send_frame(frame_data):
+    nparr = np.frombuffer(frame_data, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        print(f"Failed to decode frame from client {request.sid}")
+        return
 
-        # Perform some OpenCV processing (e.g., draw on frame)
+    processing_type = client_processing_options.get(request.sid, "default")
+
+    processed_frame = process_frame(frame, processing_type)
+
+    # Encode frame as JPEG with maximum quality
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
+    _, buffer = cv2.imencode(".jpg", processed_frame, encode_param)
+    frame_data = buffer.tobytes()
+
+    socketio.emit("processed_frame", frame_data, to=request.sid)
+
+
+def process_frame(frame, processing_type):
+    if processing_type == "grayscale":
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    elif processing_type == "edge":
+        frame = cv2.Canny(frame, 100, 200)
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    else:
         cv2.putText(
-            frame, "Streaming...", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+            frame, "Streaming...", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3
         )
-
-        # Encode frame as JPEG
-        _, buffer = cv2.imencode(".jpg", frame)
-        frame_data = buffer.tobytes()
-
-        try:
-            # Emit the processed frame
-            socketio.emit("video_frame", frame_data, to=sid)
-        except Exception as e:
-            print(f"Error emitting frame to {sid}: {e}")
-            break
-
-        socketio.sleep(0)  # Yield control to the event loop
-
-    cap.release()
-    print(f"Stopped streaming for client: {sid}")
+    return frame
 
 
 if __name__ == "__main__":
