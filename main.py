@@ -1,15 +1,10 @@
 from flask import Flask, request
-from flask_socketio import SocketIO, emit, disconnect
+from flask_socketio import SocketIO, emit
 import cv2
-import time
-
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret!"
 socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000")
-
-# Store active connections and streaming status
-clients = {}
 
 
 @app.route("/")
@@ -19,14 +14,11 @@ def hello():
 
 @socketio.on("connect")
 def handle_connect():
-    clients[request.sid] = True
     print(f"Client connected: {request.sid}")
 
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    # Set the client's status to False to stop the background task
-    clients[request.sid] = False
     print(f"Client disconnected: {request.sid}")
 
 
@@ -38,7 +30,7 @@ def video_stream():
 
 def stream_video(sid):
     cap = cv2.VideoCapture(0)
-    while cap.isOpened() and clients.get(sid, False):
+    while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
@@ -52,9 +44,14 @@ def stream_video(sid):
         _, buffer = cv2.imencode(".jpg", frame)
         frame_data = buffer.tobytes()
 
-        # Emit the processed frame
-        socketio.emit("video_frame", frame_data, to=sid)
+        try:
+            # Emit the processed frame
+            socketio.emit("video_frame", frame_data, to=sid)
+        except Exception as e:
+            print(f"Error emitting frame to {sid}: {e}")
+            break
 
+        socketio.sleep(0)  # Yield control to the event loop
 
     cap.release()
     print(f"Stopped streaming for client: {sid}")
