@@ -16,7 +16,7 @@ from opencv_logic import (
     process_frame as measure_process_frame,
     USE_CONFIDENCE_THRESHOLD,
 )
-from firebase_util import initialize_firebase, save_file_to_storage, save_measurement_to_firestore
+from firebase_util import loadFirebaseFromApp, save_file_to_storage, save_measurement_to_firestore
 from firebase_admin import firestore
 
 app = Flask(__name__)
@@ -48,7 +48,7 @@ VIDEO_FOLDER = "videos"
 os.makedirs(VIDEO_FOLDER, exist_ok=True)
 
 # Initialize Firebase
-initialize_firebase()
+loadFirebaseFromApp(app)
 db = firestore.client()
 
 @app.route("/")
@@ -65,9 +65,9 @@ def serve_static_file(path):
 def handle_connect(auth):
     print(f"Client connected: {request.sid}")
 
-    # Extract userName and workout from auth
-    user_name = ('Bob_8f0c3aae-30ce-4c6d-b6d1-0c3993e1808d')
-    workout = ('knee1')
+    # Extract userName and workout from auth object
+    user_name = "Bob_8f0c3aae-30ce-4c6d-b6d1-0c3993e1808d"
+    workout = "knee1" #send a workout type
 
     if not user_name or not workout:
         print(f"Missing userName or workout for client {request.sid}")
@@ -88,6 +88,7 @@ def handle_connect(auth):
     client_pose_instances[request.sid] = pose_instance
     # Initialize pre-measurement frame buffer for the client
     client_frame_buffers[request.sid] = deque(maxlen=PRE_FRAME_BUFFER_SIZE)
+
 
 
 @socketio.on("disconnect")
@@ -403,7 +404,7 @@ def save_mp4_video(frames, client_id, measurement_state):
 
             # Emit event with measurement data
             socketio.emit(
-                "measurement_complete",
+                "measurement_saved",
                 {"message": "Measurement completed successfully", "measurement_data": measurement_data},
                 to=client_id,
             )
@@ -451,5 +452,5 @@ def initiate_post_measurement(client_id):
 
 if __name__ == "__main__":
     socketio.run(
-        app, host="127.0.0.1", port=5000, debug=True, allow_unsafe_werkzeug=True
+        app, host="127.0.0.1", port=5000, debug=False, allow_unsafe_werkzeug=True
     )

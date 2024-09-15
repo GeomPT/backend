@@ -1,7 +1,7 @@
 import firebase_admin
 from firebase_admin import initialize_app
 from firebase_admin import credentials, storage, firestore
-from flask import request, jsonify
+from flask import Flask, request, jsonify
 import uuid
 from io import BytesIO
 
@@ -29,14 +29,6 @@ def errorWrapper(func):
 
     wrapper.__name__ = func.__name__
     return wrapper
-
-def initialize_firebase():
-    # Initialize Firebase Admin SDK
-    if not firebase_admin._apps:
-        cred = credentials.Certificate('path/to/your/serviceAccountKey.json')
-        firebase_admin.initialize_app(cred, {
-            'storageBucket': 'your-firebase-storage-bucket-url'
-        })
 
 def save_file_to_storage(user_id, file_type, file_name, file_bytes: BytesIO):
     bucket = storage.bucket()
@@ -86,15 +78,20 @@ def loadFirebaseFromApp(app):
     @app.route("/api/users/<userId>", methods=["GET"])
     @errorWrapper
     def getUser(userId=None):
-        userRef = db.collection("users").document(userId)
-        userDoc = userRef.get()
+        try:
+            userRef = db.collection("users").document(userId)
+            userDoc = userRef.get()
 
-        print("sending back user")
+            print("sending back user")
 
-        if userDoc.exists:
-            return jsonify(userDoc.to_dict()), 200
-        else:
-            return jsonify({"error": f"No such user with ID: {userId}"}), 404
+            if userDoc.exists:
+                return jsonify(userDoc.to_dict()), 200
+            else:
+                return jsonify({"error": f"No such user with ID: {userId}"}), 404
+
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
         
 
     @app.route("/api/users/<userId>/<workout>", methods=["POST"])
