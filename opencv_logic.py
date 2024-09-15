@@ -87,7 +87,16 @@ def drawJointVisualizations(image, pos1, pos2, pos3):
     # Draw the arc
     center = pos2
     axes = (arc_radius, arc_radius)
-    cv2.ellipse(image, center, axes, 0, start_angle, end_angle, (0, 0, 0), 2)
+    cv2.ellipse(
+        image,
+        center,
+        axes,
+        0,
+        min(start_angle, end_angle),
+        max(start_angle, end_angle),
+        (0, 0, 0),
+        2,
+    )
 
     # Create points along the arc
     num_points = 50  # More points for a smoother arc
@@ -167,7 +176,9 @@ def process_frame(frame, processing_type, pose_instance):
         angle = calculateAngle(*positions)
         drawJointVisualizations(image, *positions)
         drawTextAtPoint(
-            image, f"{processing_type.capitalize()} Angle: {int(angle)} deg", positions[1]
+            image,
+            f"{processing_type.capitalize()} Angle: {int(angle)} deg",
+            positions[1],
         )
     except Exception as e:
         # If landmarks are not detected, pass without altering the image
