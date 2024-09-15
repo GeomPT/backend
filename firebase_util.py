@@ -39,11 +39,11 @@ def save_file_to_storage(user_id, file_type, file_name, file_bytes: BytesIO):
     return blob.public_url
 
 
-def save_measurement_to_firestore(user_name, workout, measurement_id, measurement_data):
+def save_measurement_to_firestore(user_id, workout, measurement_id, measurement_data):
     db = firestore.client()
     doc_ref = (
         db.collection("users")
-        .document(user_name)
+        .document(user_id)
         .collection(workout)
         .document(measurement_id)
     )
