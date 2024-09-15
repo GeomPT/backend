@@ -13,6 +13,7 @@ MODE_TO_LANDMARKS = {
     "knee": ["HIP", "KNEE", "ANKLE"],
     "elbow": ["SHOULDER", "ELBOW", "WRIST"],
     "shoulder": ["ELBOW", "SHOULDER", "HIP"],
+    "elbow_horizontal": ["WRIST", "ELBOW"],
 }
 
 # Boolean to toggle confidence threshold check
@@ -195,6 +196,11 @@ def process_frame(frame, processing_type, pose_instance):
             confidences.append(visibility)
         confidence = min(confidences)  # Use the minimum confidence among landmarks
 
+        if processing_type == "elbow_horizontal":
+            offset = 200
+            point_left = [positions[1][0] - offset, positions[1][1]]
+            positions.append([point_left[0], point_left[1]])
+
         # Check if all confidences are above the threshold
         if not USE_CONFIDENCE_THRESHOLD or all(
             conf >= confidence_threshold for conf in confidences
@@ -216,7 +222,7 @@ def process_frame(frame, processing_type, pose_instance):
                 1,
                 (0, 0, 255),
                 2,
-                cv2.LINE_AA, # antialiasing
+                cv2.LINE_AA,  # antialiasing
             )
     except Exception as e:
         # Landmarks not detected
