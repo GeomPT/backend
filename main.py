@@ -10,20 +10,20 @@ import time
 from datetime import datetime
 from collections import deque
 import threading
-import imageio  # Import imageio for GIF saving
+from io import BytesIO
 
 from opencv_logic import (
     process_frame as measure_process_frame,
     USE_CONFIDENCE_THRESHOLD,
 )
-from firebase_util import loadFirebaseFromApp, addGraphData, saveFile
+from firebase_util import loadFirebaseFromApp, saveFile
 
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret!"
-CORS(app, origins=["http://localhost:3000"]) # Flask CORS needed for DB
+CORS(app, origins=["http://localhost:3000"])  # Flask CORS needed for DB
 # socketio cors needed for websocket
-socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000") 
+socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000")
 
 client_processing_options = {}
 client_pose_instances = {}
@@ -49,6 +49,8 @@ os.makedirs(VIDEO_FOLDER, exist_ok=True)
 # Base URL for constructing video URLs
 BASE_URL = "http://localhost:5000"
 
+
+# Save MP4 video to Firebase
 def save_mp4_video(frames, client_id, timestamp):
     if not frames:
         print(f"No frames to save for video for client {client_id}")
@@ -70,12 +72,13 @@ def save_mp4_video(frames, client_id, timestamp):
                 None,
                 fx=upscale_factor,
                 fy=upscale_factor,
-                interpolation=cv2.INTER_CUBIC
-            ) for frame in frames
+                interpolation=cv2.INTER_CUBIC,
+            )
+            for frame in frames
         ]
 
         # Define the codec and create VideoWriter object
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 'mp4v' codec for MP4
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # 'mp4v' codec for MP4
         height, width, _ = frames_resized[0].shape
         video_writer = cv2.VideoWriter(video_path, fourcc, FRAME_RATE, (width, height))
 
@@ -86,8 +89,12 @@ def save_mp4_video(frames, client_id, timestamp):
 
         print(f"MP4 video saved for client {client_id} at {video_path}")
 
-        # Construct the video URL
-        video_url = f"{BASE_URL}/videos/{video_filename}"
+        # Read the video as bytes to upload to Firebase
+        with open(video_path, "rb") as video_file:
+            video_bytes = BytesIO(video_file.read())
+
+        # Save the MP4 video in Firebase Storage
+        video_url = saveFile(client_id, "videos", video_filename, video_bytes)
 
         # Emit event with video URL
         socketio.emit(
@@ -105,17 +112,18 @@ def save_mp4_video(frames, client_id, timestamp):
             to=client_id,
         )
 
-@app.route('/')
+
+@app.route("/")
 def index():
     return "Welcome to the Measurement Server!"
 
 
-@app.route('/<path:path>')
+@app.route("/<path:path>")
 def serve_static_file(path):
-    return send_from_directory('static', path)
+    return send_from_directory("static", path)
 
 
-@app.route('/videos/<filename>')
+@app.route("/videos/<filename>")
 def serve_video(filename):
     return send_from_directory(VIDEO_FOLDER, filename)
 
@@ -272,18 +280,26 @@ def handle_send_frame(frame_data):
 
         # Handle post-measurement frame collection
         if measurement_state.get("post_measurement_started", False):
-            elapsed_time = time.time() - measurement_state["post_measurement_start_time"]
+            elapsed_time = (
+                time.time() - measurement_state["post_measurement_start_time"]
+            )
             if elapsed_time <= POST_MEASUREMENT_SECONDS:
                 # Collect post-measurement frames
-                measurement_state["post_measurement_frames"].append(processed_frame.copy())
+                measurement_state["post_measurement_frames"].append(
+                    processed_frame.copy()
+                )
             else:
                 # Post-measurement frame collection completed
                 frames_to_save = (
                     measurement_state["pre_measurement_frames"]
                     + measurement_state["post_measurement_frames"]
                 )
-                timestamp = measurement_state.get("timestamp", datetime.now().strftime("%Y%m%d_%H%M%S"))
-                threading.Thread(target=save_mp4_video, args=(frames_to_save, request.sid, timestamp)).start()
+                timestamp = measurement_state.get(
+                    "timestamp", datetime.now().strftime("%Y%m%d_%H%M%S")
+                )
+                threading.Thread(
+                    target=save_mp4_video, args=(frames_to_save, request.sid, timestamp)
+                ).start()
                 # Clean up measurement state
                 client_measurement_state.pop(request.sid, None)
 
@@ -299,9 +315,7 @@ def handle_send_frame(frame_data):
 def handle_begin_measurement():
     # Initialize measurement state for the client
     client_measurement_state[request.sid] = {
-        "measurement_started": (
-            False if USE_COUNTDOWN else True
-        ),
+        "measurement_started": (False if USE_COUNTDOWN else True),
         "max_angle": None,
         "max_angle_frame": None,
         "max_angle_confidence": None,
@@ -395,71 +409,25 @@ def save_measurement(measurement_state, client_id):
 def initiate_post_measurement(client_id):
     measurement_state = client_measurement_state.get(client_id)
     if measurement_state is None:
-        print(f"No measurement state found for client {client_id} during post-measurement initiation")
+        print(
+            f"No measurement state found for client {client_id} during post-measurement initiation"
+        )
         return
 
     measurement_state["post_measurement_started"] = True
     measurement_state["post_measurement_start_time"] = time.time()
     measurement_state["post_measurement_frames"] = []
-    measurement_state["pre_measurement_frames"] = list(client_frame_buffers.get(client_id, []))
+    measurement_state["pre_measurement_frames"] = list(
+        client_frame_buffers.get(client_id, [])
+    )
     # Store timestamp if not already stored
     if "timestamp" not in measurement_state:
         measurement_state["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
     print(f"Initiated post-measurement frame collection for client {client_id}")
 
 
-def save_gif(frames, client_id, timestamp):
-    if not frames:
-        print(f"No frames to save for GIF for client {client_id}")
-        socketio.emit(
-            "gif_save_failed",
-            {"message": "No frames available to save GIF"},
-            to=client_id,
-        )
-        return
-
-    gif_filename = f"measurement_{timestamp}_{client_id}.gif"
-    gif_path = os.path.join(VIDEO_FOLDER, gif_filename)
-    try:
-        # Convert frames to RGB format for imageio
-        frames_rgb = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
-
-        # Increase resolution by resizing frames
-        upscale_factor = 2  # Adjust as needed
-        frames_rgb = [
-            cv2.resize(
-                frame,
-                None,
-                fx=upscale_factor,
-                fy=upscale_factor,
-                interpolation=cv2.INTER_CUBIC
-            ) for frame in frames_rgb
-        ]
-
-        # Save frames as GIF with increased frame rate
-        imageio.mimsave(gif_path, frames_rgb, format='GIF', fps=FRAME_RATE)
-
-        print(f"GIF saved for client {client_id} at {gif_path}")
-
-        # Construct the GIF URL
-        gif_url = f"{BASE_URL}/videos/{gif_filename}"
-
-        # Emit event with GIF URL
-        socketio.emit(
-            "gif_saved",
-            {"message": "GIF saved successfully", "gif_url": gif_url},
-            to=client_id,
-        )
-    except Exception as e:
-        print(f"Failed to save GIF for client {client_id}: {e}")
-        if os.path.exists(gif_path):
-            os.remove(gif_path)
-        socketio.emit(
-            "gif_save_failed",
-            {"message": "Failed to save GIF"},
-            to=client_id,
-        )
-
 if __name__ == "__main__":
     loadFirebaseFromApp(app)
-    socketio.run(app, host="127.0.0.1", port=5000, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(
+        app, host="127.0.0.1", port=5000, debug=True, allow_unsafe_werkzeug=True
+    )
