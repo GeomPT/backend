@@ -1,4 +1,6 @@
-from firebase_admin import initialize_app, credentials, firestore, storage
+import firebase_admin
+from firebase_admin import initialize_app
+from firebase_admin import credentials, storage, firestore
 from flask import request, jsonify
 import uuid
 from io import BytesIO
@@ -27,6 +29,26 @@ def errorWrapper(func):
 
     wrapper.__name__ = func.__name__
     return wrapper
+
+def initialize_firebase():
+    # Initialize Firebase Admin SDK
+    if not firebase_admin._apps:
+        cred = credentials.Certificate('path/to/your/serviceAccountKey.json')
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': 'your-firebase-storage-bucket-url'
+        })
+
+def save_file_to_storage(user_id, file_type, file_name, file_bytes: BytesIO):
+    bucket = storage.bucket()
+    blob = bucket.blob(f"{file_type}/{user_id}/{file_name}")
+    blob.upload_from_file(file_bytes)
+    blob.make_public()
+    return blob.public_url
+
+def save_measurement_to_firestore(user_name, workout, measurement_id, measurement_data):
+    db = firestore.client()
+    doc_ref = db.collection('users').document(user_name).collection(workout).document(measurement_id)
+    doc_ref.set(measurement_data)
 
 
 # Firebase app routes

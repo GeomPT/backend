@@ -5,19 +5,19 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import os
-import json
 import time
 from datetime import datetime
 from collections import deque
 import threading
 from io import BytesIO
+import uuid
 
 from opencv_logic import (
     process_frame as measure_process_frame,
     USE_CONFIDENCE_THRESHOLD,
 )
-from firebase_util import loadFirebaseFromApp, saveFile
-
+from firebase_util import initialize_firebase, save_file_to_storage, save_measurement_to_firestore
+from firebase_admin import firestore
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret!"
@@ -29,6 +29,7 @@ client_processing_options = {}
 client_pose_instances = {}
 client_measurement_state = {}
 client_frame_buffers = {}
+client_user_info = {}  # Stores userName and workout for each client
 
 USE_COUNTDOWN = True
 USE_ANGLE_SMOOTHING = True
@@ -46,72 +47,9 @@ POST_FRAME_BUFFER_SIZE = int(POST_MEASUREMENT_SECONDS * FRAME_RATE)
 VIDEO_FOLDER = "videos"
 os.makedirs(VIDEO_FOLDER, exist_ok=True)
 
-# Base URL for constructing video URLs
-BASE_URL = "http://localhost:5000"
-
-
-# Save MP4 video to Firebase
-def save_mp4_video(frames, client_id, timestamp):
-    if not frames:
-        print(f"No frames to save for video for client {client_id}")
-        socketio.emit(
-            "video_save_failed",
-            {"message": "No frames available to save video"},
-            to=client_id,
-        )
-        return
-
-    video_filename = f"measurement_{timestamp}_{client_id}.mp4"
-    video_path = os.path.join(VIDEO_FOLDER, video_filename)
-    try:
-        # Increase resolution if needed
-        upscale_factor = 1  # Adjust as needed
-        frames_resized = [
-            cv2.resize(
-                frame,
-                None,
-                fx=upscale_factor,
-                fy=upscale_factor,
-                interpolation=cv2.INTER_CUBIC,
-            )
-            for frame in frames
-        ]
-
-        # Define the codec and create VideoWriter object
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # 'mp4v' codec for MP4
-        height, width, _ = frames_resized[0].shape
-        video_writer = cv2.VideoWriter(video_path, fourcc, FRAME_RATE, (width, height))
-
-        for frame in frames_resized:
-            video_writer.write(frame)
-
-        video_writer.release()
-
-        print(f"MP4 video saved for client {client_id} at {video_path}")
-
-        # Read the video as bytes to upload to Firebase
-        with open(video_path, "rb") as video_file:
-            video_bytes = BytesIO(video_file.read())
-
-        # Save the MP4 video in Firebase Storage
-        video_url = saveFile(client_id, "videos", video_filename, video_bytes)
-
-        # Emit event with video URL
-        socketio.emit(
-            "video_saved",
-            {"message": "MP4 video saved successfully", "video_url": video_url},
-            to=client_id,
-        )
-    except Exception as e:
-        print(f"Failed to save video for client {client_id}: {e}")
-        if os.path.exists(video_path):
-            os.remove(video_path)
-        socketio.emit(
-            "video_save_failed",
-            {"message": "Failed to save video"},
-            to=client_id,
-        )
-
+# Initialize Firebase
+initialize_firebase()
+db = firestore.client()
 
 @app.route("/")
 def index():
@@ -123,14 +61,25 @@ def serve_static_file(path):
     return send_from_directory("static", path)
 
 
-@app.route("/videos/<filename>")
-def serve_video(filename):
-    return send_from_directory(VIDEO_FOLDER, filename)
-
-
 @socketio.on("connect")
 def handle_connect(auth):
     print(f"Client connected: {request.sid}")
+
+    # Extract userName and workout from auth
+    user_name = ('Bob_8f0c3aae-30ce-4c6d-b6d1-0c3993e1808d')
+    workout = ('knee1')
+
+    if not user_name or not workout:
+        print(f"Missing userName or workout for client {request.sid}")
+        emit('connection_error', {'message': 'Missing userName or workout'})
+        return
+
+    # Store user info
+    client_user_info[request.sid] = {
+        'userName': user_name,
+        'workout': workout
+    }
+
     # Initialize Pose instance for the client
     pose_instance = mp.solutions.pose.Pose(
         min_detection_confidence=0.5,
@@ -153,6 +102,8 @@ def handle_disconnect():
     client_measurement_state.pop(request.sid, None)
     # Remove frame buffer
     client_frame_buffers.pop(request.sid, None)
+    # Remove user info
+    client_user_info.pop(request.sid, None)
 
 
 @socketio.on("start_processing")
@@ -242,23 +193,11 @@ def handle_send_frame(frame_data):
                             save_measurement(measurement_state, request.sid)
                             # Start post-measurement frame collection
                             initiate_post_measurement(request.sid)
-                            # Notify client
-                            socketio.emit(
-                                "measurement_completed",
-                                {"message": "Measurement completed"},
-                                to=request.sid,
-                            )
                     else:
                         measurement_state["measurement_started"] = False
                         save_measurement(measurement_state, request.sid)
                         # Start post-measurement frame collection
                         initiate_post_measurement(request.sid)
-                        # Notify client
-                        socketio.emit(
-                            "measurement_completed",
-                            {"message": "Measurement completed"},
-                            to=request.sid,
-                        )
                 else:
                     measurement_state["below_threshold_counter"] = 0
             else:
@@ -294,11 +233,8 @@ def handle_send_frame(frame_data):
                     measurement_state["pre_measurement_frames"]
                     + measurement_state["post_measurement_frames"]
                 )
-                timestamp = measurement_state.get(
-                    "timestamp", datetime.now().strftime("%Y%m%d_%H%M%S")
-                )
                 threading.Thread(
-                    target=save_mp4_video, args=(frames_to_save, request.sid, timestamp)
+                    target=save_mp4_video, args=(frames_to_save, request.sid, measurement_state)
                 ).start()
                 # Clean up measurement state
                 client_measurement_state.pop(request.sid, None)
@@ -360,18 +296,14 @@ def process_frame(frame, processing_type, pose_instance):
 def save_measurement(measurement_state, client_id):
     max_angle = measurement_state["max_angle"]
     max_angle_frame = measurement_state["max_angle_frame"]
-    joint_name = measurement_state["joint_name"]
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     measurement_state["timestamp"] = timestamp
-    filename_base = f"{joint_name}_{timestamp}_{client_id}"
     max_angle_confidence = measurement_state.get("max_angle_confidence", 0)
 
-    # Check if confidence is high enough to save measurement
     if USE_CONFIDENCE_THRESHOLD and (
         max_angle_confidence is None or max_angle_confidence < 0.5
     ):
         print(f"Measurement failed due to low confidence for client {client_id}")
-        # Notify client
         socketio.emit(
             "measurement_failed",
             {"message": "Measurement failed due to low confidence"},
@@ -379,31 +311,122 @@ def save_measurement(measurement_state, client_id):
         )
         return
 
-    photo_folder_path = os.path.join("measurements", filename_base)
-    os.makedirs(photo_folder_path, exist_ok=True)
+    try:
+        # Convert image to bytes
+        _, img_encoded = cv2.imencode('.jpg', max_angle_frame)
+        image_bytes = BytesIO(img_encoded.tobytes())
 
-    # Save the image
-    image_filename = os.path.join(photo_folder_path, "photo.jpg")
-    cv2.imwrite(image_filename, max_angle_frame)
+        image_filename = f"photo_{timestamp}_{client_id}.jpg"
 
-    # Save the measurement result as JSON
-    measurement_data = {
-        "joint_name": joint_name,
-        "max_angle": max_angle,
-        "timestamp": timestamp,
-        "confidence": max_angle_confidence,
-    }
-    json_filename = os.path.join(photo_folder_path, "angle.json")
+        # Use save_file_to_storage to upload image to Firebase
+        image_url = save_file_to_storage(client_id, "image", image_filename, image_bytes)
 
-    with open(json_filename, "w") as f:
-        json.dump(measurement_data, f)
+        # Store image URL and value in measurement state
+        measurement_state["image_url"] = image_url
+        measurement_state["value"] = max_angle
 
-    print(f"Measurement saved for client {client_id}: angle {max_angle} at {timestamp}")
-    socketio.emit(
-        "measurement_saved",
-        {"message": "Measurement saved successfully"},
-        to=client_id,
-    )
+        print(f"Measurement saved for client {client_id}: angle {max_angle} at {timestamp}")
+
+    except Exception as e:
+        print(f"Failed to save measurement for client {client_id}: {e}")
+        socketio.emit(
+            "measurement_failed",
+            {"message": "Failed to save measurement"},
+            to=client_id,
+        )
+
+
+def save_mp4_video(frames, client_id, measurement_state):
+    if not frames:
+        print(f"No frames to save for video for client {client_id}")
+        socketio.emit(
+            "video_save_failed",
+            {"message": "No frames available to save video"},
+            to=client_id,
+        )
+        return
+
+    timestamp = measurement_state.get("timestamp", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+    video_filename = f"measurement_{timestamp}_{client_id}.mp4"
+    video_path = os.path.join(VIDEO_FOLDER, video_filename)
+    try:
+        # Increase resolution if needed
+        upscale_factor = 1  # Adjust as needed
+        frames_resized = [
+            cv2.resize(
+                frame,
+                None,
+                fx=upscale_factor,
+                fy=upscale_factor,
+                interpolation=cv2.INTER_CUBIC,
+            )
+            for frame in frames
+        ]
+
+        # Define the codec and create VideoWriter object
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        height, width, _ = frames_resized[0].shape
+        video_writer = cv2.VideoWriter(video_path, fourcc, FRAME_RATE, (width, height))
+
+        for frame in frames_resized:
+            video_writer.write(frame)
+
+        video_writer.release()
+
+        print(f"MP4 video saved for client {client_id} at {video_path}")
+
+        # Read the video as bytes to upload to Firebase
+        with open(video_path, "rb") as video_file:
+            video_bytes = BytesIO(video_file.read())
+
+        # Save the MP4 video in Firebase Storage
+        video_url = save_file_to_storage(client_id, "video", video_filename, video_bytes)
+
+        # Store video URL in measurement state
+        measurement_state["video_url"] = video_url
+
+        # Save measurement data to Firestore
+        user_info = client_user_info.get(client_id)
+        if user_info:
+            user_name = user_info['userName']
+            workout = user_info['workout']
+            measurement_id = str(uuid.uuid4())
+
+            measurement_data = {
+                "imageUrl": measurement_state.get("image_url"),
+                "timestamp": measurement_state.get("timestamp"),
+                "value": measurement_state.get("value"),
+                "videoUrl": measurement_state.get("video_url"),
+            }
+
+            save_measurement_to_firestore(user_name, workout, measurement_id, measurement_data)
+
+            # Emit event with measurement data
+            socketio.emit(
+                "measurement_complete",
+                {"message": "Measurement completed successfully", "measurement_data": measurement_data},
+                to=client_id,
+            )
+
+            print(f"Measurement data saved and sent to client {client_id}")
+
+        else:
+            print(f"No user info found for client {client_id}")
+            socketio.emit(
+                "measurement_failed",
+                {"message": "User information not found"},
+                to=client_id,
+            )
+
+    except Exception as e:
+        print(f"Failed to save video for client {client_id}: {e}")
+        if os.path.exists(video_path):
+            os.remove(video_path)
+        socketio.emit(
+            "video_save_failed",
+            {"message": "Failed to save video"},
+            to=client_id,
+        )
 
 
 def initiate_post_measurement(client_id):
@@ -422,12 +445,11 @@ def initiate_post_measurement(client_id):
     )
     # Store timestamp if not already stored
     if "timestamp" not in measurement_state:
-        measurement_state["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
+        measurement_state["timestamp"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     print(f"Initiated post-measurement frame collection for client {client_id}")
 
 
 if __name__ == "__main__":
-    loadFirebaseFromApp(app)
     socketio.run(
         app, host="127.0.0.1", port=5000, debug=True, allow_unsafe_werkzeug=True
     )
