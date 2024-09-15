@@ -11,7 +11,7 @@ initialize_app(cred, {"storageBucket": "hackmit2024-69f95.appspot.com"})
 db = firestore.client()
 
 
-def gerneateUserId(name):
+def generateUserId(name):
     return name + "_" + str(uuid.uuid4()).replace("-", "")[:8]
 
 
