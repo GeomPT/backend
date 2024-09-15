@@ -61,6 +61,20 @@ def loadFirebaseFromApp(app):
         db.collection("users").document(userId).set(data)
         return jsonify({"message": "User added successfully"}), 200
 
+    @app.route("/api/users/<userId>", methods=["GET"])
+    @errorWrapper
+    def getUser(userId=None):
+        userRef = db.collection("users").document(userId)
+        userDoc = userRef.get()
+
+        print("sending back user")
+
+        if userDoc.exists:
+            return jsonify(userDoc.to_dict()), 200
+        else:
+            return jsonify({"error": f"No such user with ID: {userId}"}), 404
+        
+
     @app.route("/api/users/<userId>/<workout>", methods=["POST"])
     @errorWrapper
     def addGraphData(userId=None, workout=None):
