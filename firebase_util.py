@@ -30,6 +30,7 @@ def errorWrapper(func):
     wrapper.__name__ = func.__name__
     return wrapper
 
+
 def save_file_to_storage(user_id, file_type, file_name, file_bytes: BytesIO):
     bucket = storage.bucket()
     blob = bucket.blob(f"{file_type}/{user_id}/{file_name}")
@@ -37,9 +38,15 @@ def save_file_to_storage(user_id, file_type, file_name, file_bytes: BytesIO):
     blob.make_public()
     return blob.public_url
 
+
 def save_measurement_to_firestore(user_name, workout, measurement_id, measurement_data):
     db = firestore.client()
-    doc_ref = db.collection('users').document(user_name).collection(workout).document(measurement_id)
+    doc_ref = (
+        db.collection("users")
+        .document(user_name)
+        .collection(workout)
+        .document(measurement_id)
+    )
     doc_ref.set(measurement_data)
 
 
@@ -92,8 +99,6 @@ def loadFirebaseFromApp(app):
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-        
-
     @app.route("/api/users/<userId>/<workout>", methods=["POST"])
     @errorWrapper
     def addGraphData(userId=None, workout=None):
@@ -121,6 +126,14 @@ def loadFirebaseFromApp(app):
             jsonify({"message": f"Graph data added for {userId} for {workout}"}),
             200,
         )
+
+    @app.route("/api/users/<userId>/<workout>", methods=["GET"])
+    @errorWrapper
+    def getGraphData(userId=None, workout=None):
+        userRef = db.collection("users").document(userId)
+        graphDataRef = userRef.collection(workout)
+        data = [doc.to_dict() for doc in graphDataRef.get()]
+        return jsonify(data), 200
 
 
 # Helper function to save file to Firebase Storage and return public URL
