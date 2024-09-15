@@ -1,13 +1,6 @@
-# opencv_processing.py
-
 import cv2
 import numpy as np
 import mediapipe as mp
-import warnings
-
-warnings.filterwarnings(
-    "ignore", category=UserWarning, module="google.protobuf.symbol_database"
-)
 
 mp_drawing = mp.solutions.drawing_utils
 
@@ -16,6 +9,9 @@ MODE_TO_LANDMARKS = {
     "elbow": ["SHOULDER", "ELBOW", "WRIST"],
     "shoulder": ["ELBOW", "SHOULDER", "HIP"],
 }
+
+# Boolean to toggle confidence threshold check
+USE_CONFIDENCE_THRESHOLD = True
 
 
 def calculateAngle(a, b, c):
@@ -151,12 +147,15 @@ def drawTextAtPoint(image, text, point):
 
 def process_frame(frame, processing_type, pose_instance):
     angle = None  # Initialize angle to None
+    confidence = None  # Initialize confidence to None
+    confidence_threshold = 0.5  # Adjust this threshold as needed
+
     if processing_type not in MODE_TO_LANDMARKS:
         # Default processing: just return the frame with a message
         cv2.putText(
             frame, "Streaming...", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3
         )
-        return frame, angle  # Return angle as None
+        return frame, angle, confidence  # Return angle as None
 
     # Recolor image to RGB
     image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -174,20 +173,48 @@ def process_frame(frame, processing_type, pose_instance):
         landmarkNames = [
             f"RIGHT_{bodyPart}" for bodyPart in MODE_TO_LANDMARKS[processing_type]
         ]
-        positions = [
-            getLandmarkPosition(landmarks, landmarkName, frame)
-            for landmarkName in landmarkNames
-        ]
+        positions = []
+        confidences = []
+        for landmarkName in landmarkNames:
+            position = getLandmarkPosition(landmarks, landmarkName, frame)
+            positions.append(position)
+            index = mp.solutions.pose.PoseLandmark[landmarkName].value
+            visibility = landmarks[index].visibility
+            confidences.append(visibility)
+        confidence = min(confidences)  # Use the minimum confidence among landmarks
 
-        angle = calculateAngle(*positions)
-        drawJointVisualizations(image, *positions)
-        drawTextAtPoint(
-            image,
-            f"{processing_type.capitalize()} Angle: {int(angle)} deg",
-            positions[1],
-        )
+        # Check if all confidences are above the threshold
+        if not USE_CONFIDENCE_THRESHOLD or all(
+            conf >= confidence_threshold for conf in confidences
+        ):
+            angle = calculateAngle(*positions)
+            drawJointVisualizations(image, *positions)
+            drawTextAtPoint(
+                image,
+                f"{processing_type.capitalize()} Angle: {int(angle)} deg",
+                positions[1],
+            )
+        else:
+            # Low confidence in landmarks
+            cv2.putText(
+                image,
+                "Please make sure the camera can see all of you clearly",
+                (25, 50),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 255),
+                2,
+            )
     except Exception as e:
-        # If landmarks are not detected, pass without altering the image
-        pass
+        # Landmarks not detected
+        cv2.putText(
+            image,
+            "Please move into frame",
+            (25, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 0, 0),
+            3,
+        )
 
-    return image, angle
+    return image, angle, confidence
