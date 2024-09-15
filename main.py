@@ -12,7 +12,8 @@ from opencv_logic import (
     process_frame as measure_process_frame,
     USE_CONFIDENCE_THRESHOLD,
 )
-from firebase_util import loadFirebaseFromApp, addGraphData, saveFile
+from io import BytesIO
+from firebase_util import loadFirebaseFromApp, saveFile
 
 
 app = Flask(__name__)
@@ -248,12 +249,12 @@ def save_measurement(measurement_state, client_id):
         )
         return
 
-    photo_folder_path = os.path.join("measurements", filename_base)
-    os.makedirs(photo_folder_path, exist_ok=True)
+    # Convert frame to BytesIO for Firebase upload
+    _, buffer = cv2.imencode(".jpg", max_angle_frame)
+    image_file = BytesIO(buffer)
 
-    # Save the image
-    image_filename = os.path.join(photo_folder_path, "photo.jpg")
-    cv2.imwrite(image_filename, max_angle_frame)
+    # Save the image in Firebase Storage
+    image_url = saveFile(client_id, "images", f"{filename_base}_photo.jpg", image_file)
 
     # Save the measurement result as JSON
     measurement_data = {
@@ -262,15 +263,21 @@ def save_measurement(measurement_state, client_id):
         "timestamp": timestamp,
         "confidence": max_angle_confidence,
     }
-    json_filename = os.path.join(photo_folder_path, "angle.json")
+    json_data = BytesIO(json.dumps(measurement_data).encode())
 
-    with open(json_filename, "w") as f:
-        json.dump(measurement_data, f)
+    # Save JSON data in Firebase Storage
+    json_url = saveFile(
+        client_id, "measurements", f"{filename_base}_angle.json", json_data
+    )
 
     print(f"Measurement saved for client {client_id}: angle {max_angle} at {timestamp}")
     socketio.emit(
         "measurement_saved",
-        {"message": "Measurement saved successfully"},
+        {
+            "message": "Measurement saved successfully",
+            "image_url": image_url,
+            "json_url": json_url,
+        },
         to=client_id,
     )
 
