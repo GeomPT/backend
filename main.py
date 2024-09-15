@@ -276,6 +276,11 @@ def save_measurement(measurement_state, client_id):
         json.dump(measurement_data, f)
 
     print(f"Measurement saved for client {client_id}: angle {max_angle} at {timestamp}")
+    socketio.emit(
+        "measurement_saved",
+        {"message": "Measurement saved successfully"},
+        to=client_id,
+    )
 
 
 # 'assert status_set is not None, "write() before start_response"' error is due
