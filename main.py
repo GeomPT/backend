@@ -33,11 +33,11 @@ client_frame_buffers = {}
 
 USE_COUNTDOWN = True
 USE_ANGLE_SMOOTHING = True
-USE_MEASUREMENT_DELAY = True
+USE_MEASUREMENT_DELAY = False
 
 # Frame buffering and video saving configurations
-PRE_MEASUREMENT_SECONDS = 2  # Seconds before measurement
-POST_MEASUREMENT_SECONDS = .5  # Seconds after measurement
+PRE_MEASUREMENT_SECONDS = 3  # Seconds before measurement
+POST_MEASUREMENT_SECONDS = 1  # Seconds after measurement
 FRAME_RATE = 30
 
 PRE_FRAME_BUFFER_SIZE = int(PRE_MEASUREMENT_SECONDS * FRAME_RATE)
@@ -347,13 +347,17 @@ def save_measurement(measurement_state, client_id):
 def initiate_post_measurement(client_id):
     measurement_state = client_measurement_state.get(client_id)
     if measurement_state is None:
-        print(f"No measurement state found for client {client_id} during post-measurement initiation")
+        print(
+            f"No measurement state found for client {client_id} during post-measurement initiation"
+        )
         return
 
     measurement_state["post_measurement_started"] = True
     measurement_state["post_measurement_start_time"] = time.time()
     measurement_state["post_measurement_frames"] = []
-    measurement_state["pre_measurement_frames"] = list(client_frame_buffers.get(client_id, []))
+    measurement_state["pre_measurement_frames"] = list(
+        client_frame_buffers.get(client_id, [])
+    )
     # Store timestamp if not already stored
     if "timestamp" not in measurement_state:
         measurement_state["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -377,24 +381,29 @@ def save_gif(frames, client_id, timestamp):
         frames_rgb = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
 
         # Increase resolution by resizing frames
-        upscale_factor = 2  # Adjust as needed
+        upscale_factor = 0.4  # Adjust as needed
         frames_rgb = [
             cv2.resize(
                 frame,
                 None,
                 fx=upscale_factor,
                 fy=upscale_factor,
-                interpolation=cv2.INTER_CUBIC
-            ) for frame in frames_rgb
+                interpolation=cv2.INTER_CUBIC,
+            )
+            for frame in frames_rgb
         ]
 
         # Save frames as GIF with increased frame rate
-        imageio.mimsave(gif_path, frames_rgb, format='GIF', fps=FRAME_RATE)
+        imageio.mimsave(gif_path, frames_rgb, format="GIF", fps=FRAME_RATE)
 
         print(f"GIF saved for client {client_id} at {gif_path}")
 
-        # Construct the GIF URL
-        gif_url = f"{BASE_URL}/videos/{gif_filename}"
+        # Convert GIF file to BytesIO for Firebase upload
+        with open(gif_path, "rb") as gif_file:
+            gif_bytes = BytesIO(gif_file.read())
+
+        # Save the GIF in Firebase Storage
+        gif_url = saveFile(client_id, "gifs", gif_filename, gif_bytes)
 
         # Emit event with GIF URL
         socketio.emit(
@@ -411,6 +420,7 @@ def save_gif(frames, client_id, timestamp):
             {"message": "Failed to save GIF"},
             to=client_id,
         )
+
 
 if __name__ == "__main__":
     loadFirebaseFromApp(app)
