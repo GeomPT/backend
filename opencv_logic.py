@@ -1,6 +1,11 @@
 import cv2
 import numpy as np
 import mediapipe as mp
+import warnings
+
+warnings.filterwarnings(
+    "ignore", category=UserWarning, module="google.protobuf.symbol_database"
+)
 
 mp_drawing = mp.solutions.drawing_utils
 
