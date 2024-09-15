@@ -90,7 +90,6 @@ def handle_connect(auth):
     client_frame_buffers[request.sid] = deque(maxlen=PRE_FRAME_BUFFER_SIZE)
 
 
-
 @socketio.on("disconnect")
 def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
@@ -217,6 +216,8 @@ def handle_send_frame(frame_data):
                         {"message": "Measurement failed due to missing landmarks"},
                         to=request.sid,
                     )
+        
+        # COMEHERE
 
         # Handle post-measurement frame collection
         if measurement_state.get("post_measurement_started", False):
@@ -312,6 +313,11 @@ def save_measurement(measurement_state, client_id):
         )
         return
 
+    socketio.emit(
+        "measurement_complete",
+        {"message": "Measurement finished, but not saved (important for flash)"},
+        to=client_id,
+    )
     try:
         # Convert image to bytes
         _, img_encoded = cv2.imencode('.jpg', max_angle_frame)
@@ -346,6 +352,7 @@ def save_mp4_video(frames, client_id, measurement_state):
             to=client_id,
         )
         return
+    
 
     timestamp = measurement_state.get("timestamp", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
     video_filename = f"measurement_{timestamp}_{client_id}.mp4"
@@ -376,6 +383,7 @@ def save_mp4_video(frames, client_id, measurement_state):
 
         print(f"MP4 video saved for client {client_id} at {video_path}")
 
+
         # Read the video as bytes to upload to Firebase
         with open(video_path, "rb") as video_file:
             video_bytes = BytesIO(video_file.read())
@@ -400,16 +408,18 @@ def save_mp4_video(frames, client_id, measurement_state):
                 "videoUrl": measurement_state.get("video_url"),
             }
 
-            save_measurement_to_firestore(user_name, workout, measurement_id, measurement_data)
+            save_measurement_to_firestore(
+                user_name, workout, measurement_id, measurement_data
+            )
 
             # Emit event with measurement data
             socketio.emit(
                 "measurement_saved",
-                {"message": "Measurement completed successfully", "measurement_data": measurement_data},
+                {"message": "Video measurement saved to db", "measurement_data": measurement_data},
                 to=client_id,
             )
 
-            print(f"Measurement data saved and sent to client {client_id}")
+            print(f"Measurement data saved and added to db {client_id}")
 
         else:
             print(f"No user info found for client {client_id}")

@@ -89,7 +89,7 @@ def loadFirebaseFromApp(app):
             userRef = db.collection("users").document(userId)
             userDoc = userRef.get()
 
-            print("sending back user")
+            print("Getting user in Firebase...")
 
             if userDoc.exists:
                 return jsonify(userDoc.to_dict()), 200
