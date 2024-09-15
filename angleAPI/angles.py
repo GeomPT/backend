@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import mediapipe as mp
 
-
 mp_drawing = mp.solutions.drawing_utils
 mp_pose = mp.solutions.pose
 
@@ -14,13 +13,12 @@ MODE_TO_LANDMARKS = {
     "knee": ["HIP", "KNEE", "ANKLE"],
     "elbow": ["SHOULDER", "ELBOW", "WRIST"],
     "shoulder": ["ELBOW", "SHOULDER", "HIP"],
+    "elbow_horizontal": ["ELBOW", "WRIST"]  # Only two landmarks; third point is computed
 }
-
 
 def setCurrentMode(mode):
     global currentMode
     currentMode = mode
-
 
 def calculateAngle(a, b, c):
     """
@@ -51,22 +49,18 @@ def calculateAngle(a, b, c):
 
     return angle
 
-
 def getLandmarkPosition(landmarks, landmarkName, frame):
     index = mp_pose.PoseLandmark[landmarkName].value
-
     return [
         landmarks[index].x * frame.shape[1],
         landmarks[index].y * frame.shape[0],
     ]
 
-
-def drawJointVisulalizations(image, pos1, pos2, pos3):
+def drawJointVisualizations(image, pos1, pos2, pos3):
     """
     Draws lines and circles on the image to visualize the angle calculation.
     pos1 - pos2 - pos3
     """
-
     # Draw lines for visualization
     cv2.line(image, tuple(np.int32(pos1)), tuple(np.int32(pos2)), (255, 255, 0), 3)
     cv2.line(image, tuple(np.int32(pos2)), tuple(np.int32(pos3)), (255, 255, 0), 3)
@@ -75,7 +69,6 @@ def drawJointVisulalizations(image, pos1, pos2, pos3):
     cv2.circle(image, tuple(np.int32(pos1)), 10, (255, 0, 0), cv2.FILLED)
     cv2.circle(image, tuple(np.int32(pos2)), 10, (0, 255, 255), cv2.FILLED)
     cv2.circle(image, tuple(np.int32(pos3)), 10, (255, 0, 0), cv2.FILLED)
-
 
 def drawTextAtPoint(image, text, point):
     cv2.putText(
@@ -89,25 +82,45 @@ def drawTextAtPoint(image, text, point):
         cv2.LINE_AA,
     )
 
-
 def generateImageAndAngle(image, direction, landmarks, frame):
-    landmarkNames = [
-        f"{direction}_{bodyPart}" for bodyPart in MODE_TO_LANDMARKS[currentMode]
-    ]
-    positions = [
-        getLandmarkPosition(landmarks, landmarkName, frame)
-        for landmarkName in landmarkNames
-    ]
+    """
+    Generates visualizations and calculates angles based on the current mode.
+    """
+    if currentMode in ["knee", "elbow", "shoulder"]:
+        landmarkNames = [
+            f"{direction}_{bodyPart}" for bodyPart in MODE_TO_LANDMARKS[currentMode]
+        ]
+        positions = [
+            getLandmarkPosition(landmarks, landmarkName, frame)
+            for landmarkName in landmarkNames
+        ]
 
-    angle = calculateAngle(*positions)
+        angle = calculateAngle(*positions)
 
-    drawJointVisulalizations(image, *positions)
-    drawTextAtPoint(
-        image, f"{currentMode.capitalize()} Angle: {int(angle)} deg", positions[1]
-    )
+        drawJointVisualizations(image, *positions)
+        drawTextAtPoint(
+            image, f"{currentMode.capitalize()} Angle: {int(angle)} deg", positions[1]
+        )
+
+    elif currentMode == "elbow_horizontal":
+        # Get elbow and wrist positions
+        elbow = getLandmarkPosition(landmarks, "RIGHT_ELBOW", frame)
+        wrist = getLandmarkPosition(landmarks, "RIGHT_WRIST", frame)
+
+        # Compute a point 50 pixels to the left of the elbow, aligned horizontally
+        # Assuming 'left' is towards decreasing x-axis
+        offset = 200
+        point_left = [elbow[0] - offset, elbow[1]]
+
+        angle = calculateAngle(wrist, elbow, point_left)
+
+        # Draw lines and circles
+        drawJointVisualizations(image, wrist, elbow, point_left)
+        drawTextAtPoint(
+            image, f"Elbow Horizontal Angle: {int(angle)} deg", elbow
+        )
 
     return image, angle
-
 
 def generateFrames():
     global currentMode
@@ -142,3 +155,4 @@ def generateFrames():
 
         # Yield the output frame in byte format
         yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+
