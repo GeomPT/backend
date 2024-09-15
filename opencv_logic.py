@@ -227,7 +227,7 @@ def process_frame(frame, processing_type, pose_instance):
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
             (0, 0, 255),
-            3,
+            2,
             cv2.LINE_AA,
         )
 

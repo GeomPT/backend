@@ -1,5 +1,6 @@
 from flask import Flask, request
 from flask_socketio import SocketIO, emit
+from flask_cors import CORS
 import cv2
 import numpy as np
 import mediapipe as mp
@@ -11,10 +12,14 @@ from opencv_logic import (
     process_frame as measure_process_frame,
     USE_CONFIDENCE_THRESHOLD,
 )
+from firebase_util import loadFirebaseFromApp, addGraphData, saveFile
+
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret!"
-socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000")
+CORS(app, origins=["http://localhost:3000"]) # Flask CORS needed for DB
+# socketio cors needed for websocket
+socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000") 
 
 client_processing_options = {}
 client_pose_instances = {}
@@ -274,4 +279,5 @@ def save_measurement(measurement_state, client_id):
 # to running locally. Would not appear on production.
 # https://github.com/miguelgrinberg/flask-sock/issues/27
 if __name__ == "__main__":
+    loadFirebaseFromApp(app)
     socketio.run(app, host="127.0.0.1", port=5000, debug=True)
