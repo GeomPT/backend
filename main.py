@@ -98,8 +98,9 @@ def handle_send_frame(frame_data):
                     ),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     4,
-                    (0, 0, 0),
+                    (0, 0, 255),
                     6,
+                    cv2.LINE_AA,
                 )
         elif not USE_COUNTDOWN or measurement_state["measurement_started"]:
             if angle is not None:

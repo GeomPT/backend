@@ -153,12 +153,19 @@ def drawTextAtPoint(image, text, point):
 def process_frame(frame, processing_type, pose_instance):
     angle = None  # Initialize angle to None
     confidence = None  # Initialize confidence to None
-    confidence_threshold = 0.5  # Adjust this threshold as needed
+    confidence_threshold = 0.3  # Adjust this threshold as needed
 
     if processing_type not in MODE_TO_LANDMARKS:
         # Default processing: just return the frame with a message
         cv2.putText(
-            frame, "Streaming...", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3
+            frame,
+            "Streaming...",
+            (25, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            3,
+            cv2.LINE_AA,
         )
         return frame, angle, confidence  # Return angle as None
 
@@ -203,12 +210,13 @@ def process_frame(frame, processing_type, pose_instance):
             # Low confidence in landmarks
             cv2.putText(
                 image,
-                "Please make sure the camera can see all of you clearly",
+                f"Ensure that the {', '.join([body_part.lower() for body_part in MODE_TO_LANDMARKS[processing_type]])} are visible for accurate measurements",
                 (25, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
                 (0, 0, 255),
                 2,
+                cv2.LINE_AA, # antialiasing
             )
     except Exception as e:
         # Landmarks not detected
@@ -218,8 +226,9 @@ def process_frame(frame, processing_type, pose_instance):
             (25, 50),
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
-            (0, 0, 0),
+            (0, 0, 255),
             3,
+            cv2.LINE_AA,
         )
 
     return image, angle, confidence
