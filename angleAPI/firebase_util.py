@@ -4,7 +4,7 @@ import uuid
 from io import BytesIO
 
 cred = credentials.Certificate(
-    "hackmit2024-69f95-firebase-adminsdk-p2u0c-789554acbf.json"
+    "angleAPI\\hackmit2024-69f95-firebase-adminsdk-p2u0c-789554acbf.json"
 )
 initialize_app(cred, {"storageBucket": "hackmit2024-69f95.appspot.com"})
 
@@ -12,7 +12,7 @@ db = firestore.client()
 
 
 def gerneateUserId(name):
-    return name + "_" + str(uuid.uuid4())
+    return name + "_" + str(uuid.uuid4()).replace("-", "")[:8]
 
 
 def errorWrapper(func):
@@ -66,37 +66,35 @@ def loadFirebaseFromApp(app):
         else:
             return jsonify({"error": f"No such user with ID: {userId}"}), 404
 
-    @app.route("/api/users/<userId>/graph", methods=["POST"])
+    @app.route("/api/users/<userId>/<workout>", methods=["POST"])
     @errorWrapper
-    def addGraphData(userId=None):
+    def addGraphData(userId=None, workout=None):
         requestData = request.json
         value = requestData["value"]
-        name = requestData["name"]
         imageUrl = requestData["imageUrl"]
         videoUrl = requestData["videoUrl"]
 
         userRef = db.collection("users").document(userId)
-        graphDataRef = userRef.collection("graphData")
+        graphDataRef = userRef.collection(workout)
 
         data = {
             "timestamp": firestore.SERVER_TIMESTAMP,
             "value": value,
-            "name": name,
             "imageUrl": imageUrl,
             "videoUrl": videoUrl,
         }
 
         graphDataRef.add(data)
         return (
-            jsonify({"message": f"Graph data added for {userId}"}),
+            jsonify({"message": f"Graph data added for {userId} for {workout}"}),
             200,
         )
 
-    @app.route("/api/users/<userId>/graph", methods=["GET"])
+    @app.route("/api/users/<userId>/<workout>", methods=["GET"])
     @errorWrapper
-    def getGraphDataEndpoint(userId=None):
+    def getGraphDataEndpoint(userId=None, workout=None):
         userRef = db.collection("users").document(userId)
-        graphData = userRef.collection("graphData").get()
+        graphData = userRef.collection(workout).get()
 
         if graphData:
             data = [data_point.to_dict() for data_point in graphData]
@@ -137,14 +135,13 @@ def loadFirebaseFromApp(app):
     #         return jsonify({"error": f"No images for user {userId}"}), 404
 
 
-def addGraphData(userId, value, name, imageUrl, videoUrl):
+def addGraphData(userId, value, workoutName, imageUrl, videoUrl):
     userRef = db.collection("users").document(userId)
-    graphDataRef = userRef.collection("graphData")
+    graphDataRef = userRef.collection(workoutName)
 
     data = {
         "timestamp": firestore.SERVER_TIMESTAMP,
         "value": value,
-        "name": name,
         "imageUrl": imageUrl,
         "videoUrl": videoUrl,
     }
