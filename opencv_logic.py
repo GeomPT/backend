@@ -197,7 +197,7 @@ def process_frame(frame, processing_type, pose_instance):
         confidence = min(confidences)  # Use the minimum confidence among landmarks
 
         if processing_type == "elbow_horizontal":
-            offset = 200
+            offset = -200
             point_left = [positions[1][0] - offset, positions[1][1]]
             positions.append([point_left[0], point_left[1]])
 

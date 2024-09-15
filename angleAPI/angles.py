@@ -109,7 +109,7 @@ def generateImageAndAngle(image, direction, landmarks, frame):
 
         # Compute a point 50 pixels to the left of the elbow, aligned horizontally
         # Assuming 'left' is towards decreasing x-axis
-        offset = 200
+        offset = -200
         point_left = [elbow[0] - offset, elbow[1]]
 
         angle = calculateAngle(wrist, elbow, point_left)
