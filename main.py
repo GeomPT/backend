@@ -5,7 +5,7 @@ import numpy as np
 import mediapipe as mp
 import os
 import json
-import time  # Import time module for countdown
+import time
 from datetime import datetime
 from opencv_logic import (
     process_frame as measure_process_frame,
@@ -21,9 +21,9 @@ client_pose_instances = {}
 client_measurement_state = {}
 
 # Booleans to toggle levels of rigor on the auto-measurement
-USE_COUNTDOWN = True  
-USE_ANGLE_SMOOTHING = True  
-USE_MEASUREMENT_DELAY = True # False ends measurement immediately when angle drops
+USE_COUNTDOWN = True
+USE_ANGLE_SMOOTHING = True
+USE_MEASUREMENT_DELAY = True  # False ends measurement immediately when angle drops
 # USE_CONFIDENCE_THRESHOLD is imported from opencv_logic.py
 
 
@@ -136,12 +136,6 @@ def handle_send_frame(frame_data):
                             save_measurement(measurement_state, request.sid)
                             # Remove measurement state
                             client_measurement_state.pop(request.sid, None)
-                            # Notify client
-                            socketio.emit(
-                                "measurement_completed",
-                                {"message": "Measurement completed"},
-                                to=request.sid,
-                            )
                     else:
                         # Directly end measurement
                         measurement_state["measurement_started"] = False
@@ -149,12 +143,6 @@ def handle_send_frame(frame_data):
                         save_measurement(measurement_state, request.sid)
                         # Remove measurement state
                         client_measurement_state.pop(request.sid, None)
-                        # Notify client
-                        socketio.emit(
-                            "measurement_completed",
-                            {"message": "Measurement completed"},
-                            to=request.sid,
-                        )
                 else:
                     # Angle is above threshold again, reset the counter
                     measurement_state["below_threshold_counter"] = 0
@@ -165,21 +153,19 @@ def handle_send_frame(frame_data):
                     measurement_state["missing_landmarks_counter"]
                     >= measurement_state["max_missing_landmarks_frames"]
                 ):
-                    # Consider resetting or pausing the measurement
+                    # Measurement failed due to missing landmarks
                     measurement_state["measurement_started"] = False
                     print(
-                        f"Measurement paused due to missing landmarks for client {request.sid}"
+                        f"Measurement failed due to missing landmarks for client {request.sid}"
                     )
-                    # Optionally, notify the client
+                    # Remove measurement state
+                    client_measurement_state.pop(request.sid, None)
+                    # Notify the client
                     socketio.emit(
-                        "measurement_paused",
-                        {"message": "Measurement paused due to missing landmarks"},
+                        "measurement_failed",
+                        {"message": "Measurement failed due to missing landmarks"},
                         to=request.sid,
                     )
-        else:
-            # Measurement has ended or paused
-            pass
-
     # Encode frame as JPEG with maximum quality
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
     _, buffer = cv2.imencode(".jpg", processed_frame, encode_param)
@@ -247,11 +233,11 @@ def save_measurement(measurement_state, client_id):
     if USE_CONFIDENCE_THRESHOLD and (
         max_angle_confidence is None or max_angle_confidence < 0.5
     ):
-        print(f"Measurement not saved due to low confidence for client {client_id}")
-        # Optionally notify client
+        print(f"Measurement failed due to low confidence for client {client_id}")
+        # Notify client
         socketio.emit(
             "measurement_failed",
-            {"message": "Measurement not saved due to low confidence"},
+            {"message": "Measurement failed due to low confidence"},
             to=client_id,
         )
         return
