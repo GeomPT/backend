@@ -4,7 +4,7 @@ import uuid
 from io import BytesIO
 
 cred = credentials.Certificate(
-    "angleAPI\\hackmit2024-69f95-firebase-adminsdk-p2u0c-789554acbf.json"
+    "hackmit2024-69f95-firebase-adminsdk-p2u0c-789554acbf.json"
 )
 initialize_app(cred, {"storageBucket": "hackmit2024-69f95.appspot.com"})
 
