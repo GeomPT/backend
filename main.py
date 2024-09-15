@@ -275,7 +275,7 @@ def handle_begin_measurement():
 
 
 def process_frame(frame, processing_type, pose_instance):
-    if processing_type in ["knee", "elbow", "shoulder"]:
+    if processing_type in ["knee", "elbow", "shoulder", "elbow_horizontal"]:
         frame, angle, confidence = measure_process_frame(
             frame, processing_type, pose_instance
         )
