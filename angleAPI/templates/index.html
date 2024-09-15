@@ -9,13 +9,14 @@
 <body>
     <h1>Joint Angle Detection</h1>
     <div>
-        <img src="{{ url_for('video_feed', mode='knee') }}" id="videoFeed" alt="Video Feed">
+        <img src="{{ url_for('video_feed', mode='elbow_horizontal') }}" id="videoFeed" alt="Video Feed">
     </div>
     <div id="controls">
         <p>Select Mode:</p>
         <a href="{{ url_for('video_feed', mode='knee') }}"><button>Knee</button></a>
         <a href="{{ url_for('video_feed', mode='elbow') }}"><button>Elbow</button></a>
         <a href="{{ url_for('video_feed', mode='shoulder') }}"><button>Shoulder</button></a>
+        <a href="{{ url_for('video_feed', mode='elbow_horizontal') }}"><button>Elbow Horizontal</button></a>
     </div>
 </body>
 </html>

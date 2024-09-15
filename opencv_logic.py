@@ -82,8 +82,8 @@ def drawJointVisualizations(image, pos1, pos2, pos3):
     # Calculate the smallest angle between the two vectors
     angle_between = (end_angle - start_angle) % 360
     if angle_between > 180:
+        angle_between = 360 - angle_between
         start_angle, end_angle = end_angle, start_angle
-        angle_between = (end_angle - start_angle) % 360
 
     # Define the radius of the arc (relative to shorter line)
     length_ba = np.linalg.norm(ba)
@@ -98,15 +98,15 @@ def drawJointVisualizations(image, pos1, pos2, pos3):
         center,
         axes,
         0,
-        min(start_angle, end_angle),
-        max(start_angle, end_angle),
+        start_angle,
+        start_angle + angle_between,
         (0, 0, 0),
         2,
     )
 
     # Create points along the arc
     num_points = 50  # More points for a smoother arc
-    angle_range = np.linspace(start_angle, end_angle, num_points)
+    angle_range = np.linspace(start_angle, start_angle + angle_between, num_points)
     arc_points = []
     for angle in angle_range:
         theta = np.radians(angle)
