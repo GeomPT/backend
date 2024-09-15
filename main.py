@@ -16,12 +16,18 @@ from opencv_logic import (
     process_frame as measure_process_frame,
     USE_CONFIDENCE_THRESHOLD,
 )
-from firebase_util import loadFirebaseFromApp, save_file_to_storage, save_measurement_to_firestore
+from firebase_util import (
+    loadFirebaseFromApp,
+    save_file_to_storage,
+    save_measurement_to_firestore,
+)
 from firebase_admin import firestore
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret!"
-CORS(app, origins=["http://localhost:3000"], supports_credentials=True)  # Flask CORS needed for DB
+CORS(
+    app, origins=["http://localhost:3000"], supports_credentials=True
+)  # Flask CORS needed for DB
 # socketio cors needed for websocket
 socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000")
 
@@ -51,6 +57,7 @@ os.makedirs(VIDEO_FOLDER, exist_ok=True)
 # Initialize Firebase
 loadFirebaseFromApp(app)
 db = firestore.client()
+
 
 @app.route("/")
 def index():
@@ -197,12 +204,17 @@ def handle_send_frame(frame_data):
                             >= measurement_state["required_below_threshold_frames"]
                         ):
                             measurement_state["measurement_started"] = False
-                            save_measurement(measurement_state, client_user_info[request.sid]['user_id'])
+                            save_measurement(
+                                measurement_state,
+                                client_user_info[request.sid]["user_id"],
+                            )
                             # Start post-measurement frame collection
                             initiate_post_measurement(request.sid)
                     else:
                         measurement_state["measurement_started"] = False
-                        save_measurement(measurement_state, client_user_info[request.sid]['user_id'])
+                        save_measurement(
+                            measurement_state, client_user_info[request.sid]["user_id"]
+                        )
                         # Start post-measurement frame collection
                         initiate_post_measurement(request.sid)
                 else:
@@ -223,7 +235,6 @@ def handle_send_frame(frame_data):
                         {"message": "Measurement failed due to missing landmarks"},
                         to=request.sid,
                     )
-        
 
         # Handle post-measurement frame collection
         if measurement_state.get("post_measurement_started", False):
@@ -242,7 +253,12 @@ def handle_send_frame(frame_data):
                     + measurement_state["post_measurement_frames"]
                 )
                 threading.Thread(
-                    target=save_video_to_mp4, args=(frames_to_save, client_user_info[request.sid], measurement_state)
+                    target=save_video_to_mp4,
+                    args=(
+                        frames_to_save,
+                        client_user_info[request.sid],
+                        measurement_state,
+                    ),
                 ).start()
                 # Clean up measurement state
                 client_measurement_state.pop(request.sid, None)
@@ -322,23 +338,27 @@ def save_measurement(measurement_state, client_id):
     socketio.emit(
         "measurement_complete",
         {"message": "Measurement finished, but not saved (important for flash)"},
-        to=current_user_info["user_id"],
+        to=client_id,
     )
     try:
         # Convert image to bytes
-        _, img_encoded = cv2.imencode('.jpg', max_angle_frame)
+        _, img_encoded = cv2.imencode(".jpg", max_angle_frame)
         image_bytes = BytesIO(img_encoded.tobytes())
 
         image_filename = f"photo_{timestamp}_{client_id}.jpg"
 
         # Use save_file_to_storage to upload image to Firebase
-        image_url = save_file_to_storage(client_id, "image", image_filename, image_bytes)
+        image_url = save_file_to_storage(
+            client_id, "image", image_filename, image_bytes
+        )
 
         # Store image URL and value in measurement state
         measurement_state["image_url"] = image_url
         measurement_state["value"] = max_angle
 
-        print(f"Measurement saved for client {client_id}: angle {max_angle} at {timestamp}")
+        print(
+            f"Measurement saved for client {client_id}: angle {max_angle} at {timestamp}"
+        )
 
     except Exception as e:
         print(f"Failed to save measurement for client {client_id}: {e}")
@@ -362,7 +382,6 @@ def save_video_to_mp4(frames, user_info, measurement_state):
             to=user_id,
         )
         return
-    
 
     timestamp = measurement_state.get("timestamp")
     video_filename = f"measurement_{timestamp}_{user_id}.mp4"
@@ -393,7 +412,6 @@ def save_video_to_mp4(frames, user_info, measurement_state):
 
         print(f"MP4 video saved for client {user_id} at {video_path}")
 
-
         # Read the video as bytes to upload to Firebase
         with open(video_path, "rb") as video_file:
             video_bytes = BytesIO(video_file.read())
@@ -422,7 +440,10 @@ def save_video_to_mp4(frames, user_info, measurement_state):
             # Emit event with measurement data
             socketio.emit(
                 "measurement_saved",
-                {"message": "Video measurement saved to db", "measurement_data": measurement_data},
+                {
+                    "message": "Video measurement saved to db",
+                    "measurement_data": measurement_data,
+                },
                 to=user_id,
             )
 
@@ -463,11 +484,13 @@ def initiate_post_measurement(client_id):
     )
     # Store timestamp if not already stored
     if "timestamp" not in measurement_state:
-        measurement_state["timestamp"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        measurement_state["timestamp"] = datetime.utcnow().strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
     print(f"Initiated post-measurement frame collection for client {client_id}")
 
 
 if __name__ == "__main__":
     socketio.run(
-        app, host="127.0.0.1", port=5000, debug=False, allow_unsafe_werkzeug=True
+        app, host="127.0.0.1", port=5000, debug=True, allow_unsafe_werkzeug=True
     )
