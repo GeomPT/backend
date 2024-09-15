@@ -2,6 +2,7 @@ from flask import Flask, request
 from flask_socketio import SocketIO, emit
 import cv2
 import numpy as np
+from opencv_logic import process_frame as measurement_process_frame
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret!"
@@ -50,15 +51,11 @@ def handle_send_frame(frame_data):
 
 
 def process_frame(frame, processing_type):
-    if processing_type == "grayscale":
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-    elif processing_type == "edge":
-        frame = cv2.Canny(frame, 100, 200)
-        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    if processing_type in ["knee", "elbow", "shoulder"]:
+        frame = measurement_process_frame(frame, processing_type)
     else:
         cv2.putText(
-            frame, "Streaming...", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3
+            frame, "Default stream...", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3
         )
     return frame
 
