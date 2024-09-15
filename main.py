@@ -16,8 +16,7 @@ from opencv_logic import (
     process_frame as measure_process_frame,
     USE_CONFIDENCE_THRESHOLD,
 )
-from io import BytesIO
-from firebase_util import loadFirebaseFromApp, saveFile
+from firebase_util import loadFirebaseFromApp, addGraphData, saveFile
 
 
 app = Flask(__name__)
@@ -33,10 +32,10 @@ client_frame_buffers = {}
 
 USE_COUNTDOWN = True
 USE_ANGLE_SMOOTHING = True
-USE_MEASUREMENT_DELAY = False
+USE_MEASUREMENT_DELAY = True
 
 # Frame buffering and video saving configurations
-PRE_MEASUREMENT_SECONDS = 3  # Seconds before measurement
+PRE_MEASUREMENT_SECONDS = 2  # Seconds before measurement
 POST_MEASUREMENT_SECONDS = 1  # Seconds after measurement
 FRAME_RATE = 30
 
@@ -50,6 +49,61 @@ os.makedirs(VIDEO_FOLDER, exist_ok=True)
 # Base URL for constructing video URLs
 BASE_URL = "http://localhost:5000"
 
+def save_mp4_video(frames, client_id, timestamp):
+    if not frames:
+        print(f"No frames to save for video for client {client_id}")
+        socketio.emit(
+            "video_save_failed",
+            {"message": "No frames available to save video"},
+            to=client_id,
+        )
+        return
+
+    video_filename = f"measurement_{timestamp}_{client_id}.mp4"
+    video_path = os.path.join(VIDEO_FOLDER, video_filename)
+    try:
+        # Increase resolution if needed
+        upscale_factor = 1  # Adjust as needed
+        frames_resized = [
+            cv2.resize(
+                frame,
+                None,
+                fx=upscale_factor,
+                fy=upscale_factor,
+                interpolation=cv2.INTER_CUBIC
+            ) for frame in frames
+        ]
+
+        # Define the codec and create VideoWriter object
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 'mp4v' codec for MP4
+        height, width, _ = frames_resized[0].shape
+        video_writer = cv2.VideoWriter(video_path, fourcc, FRAME_RATE, (width, height))
+
+        for frame in frames_resized:
+            video_writer.write(frame)
+
+        video_writer.release()
+
+        print(f"MP4 video saved for client {client_id} at {video_path}")
+
+        # Construct the video URL
+        video_url = f"{BASE_URL}/videos/{video_filename}"
+
+        # Emit event with video URL
+        socketio.emit(
+            "video_saved",
+            {"message": "MP4 video saved successfully", "video_url": video_url},
+            to=client_id,
+        )
+    except Exception as e:
+        print(f"Failed to save video for client {client_id}: {e}")
+        if os.path.exists(video_path):
+            os.remove(video_path)
+        socketio.emit(
+            "video_save_failed",
+            {"message": "Failed to save video"},
+            to=client_id,
+        )
 
 @app.route('/')
 def index():
@@ -229,7 +283,7 @@ def handle_send_frame(frame_data):
                     + measurement_state["post_measurement_frames"]
                 )
                 timestamp = measurement_state.get("timestamp", datetime.now().strftime("%Y%m%d_%H%M%S"))
-                threading.Thread(target=save_gif, args=(frames_to_save, request.sid, timestamp)).start()
+                threading.Thread(target=save_mp4_video, args=(frames_to_save, request.sid, timestamp)).start()
                 # Clean up measurement state
                 client_measurement_state.pop(request.sid, None)
 
@@ -311,12 +365,12 @@ def save_measurement(measurement_state, client_id):
         )
         return
 
-    # Convert frame to BytesIO for Firebase upload
-    _, buffer = cv2.imencode(".jpg", max_angle_frame)
-    image_file = BytesIO(buffer)
+    photo_folder_path = os.path.join("measurements", filename_base)
+    os.makedirs(photo_folder_path, exist_ok=True)
 
-    # Save the image in Firebase Storage
-    image_url = saveFile(client_id, "images", f"{filename_base}_photo.jpg", image_file)
+    # Save the image
+    image_filename = os.path.join(photo_folder_path, "photo.jpg")
+    cv2.imwrite(image_filename, max_angle_frame)
 
     # Save the measurement result as JSON
     measurement_data = {
@@ -325,21 +379,15 @@ def save_measurement(measurement_state, client_id):
         "timestamp": timestamp,
         "confidence": max_angle_confidence,
     }
-    json_data = BytesIO(json.dumps(measurement_data).encode())
+    json_filename = os.path.join(photo_folder_path, "angle.json")
 
-    # Save JSON data in Firebase Storage
-    json_url = saveFile(
-        client_id, "measurements", f"{filename_base}_angle.json", json_data
-    )
+    with open(json_filename, "w") as f:
+        json.dump(measurement_data, f)
 
     print(f"Measurement saved for client {client_id}: angle {max_angle} at {timestamp}")
     socketio.emit(
         "measurement_saved",
-        {
-            "message": "Measurement saved successfully",
-            "image_url": image_url,
-            "json_url": json_url,
-        },
+        {"message": "Measurement saved successfully"},
         to=client_id,
     )
 
@@ -347,17 +395,13 @@ def save_measurement(measurement_state, client_id):
 def initiate_post_measurement(client_id):
     measurement_state = client_measurement_state.get(client_id)
     if measurement_state is None:
-        print(
-            f"No measurement state found for client {client_id} during post-measurement initiation"
-        )
+        print(f"No measurement state found for client {client_id} during post-measurement initiation")
         return
 
     measurement_state["post_measurement_started"] = True
     measurement_state["post_measurement_start_time"] = time.time()
     measurement_state["post_measurement_frames"] = []
-    measurement_state["pre_measurement_frames"] = list(
-        client_frame_buffers.get(client_id, [])
-    )
+    measurement_state["pre_measurement_frames"] = list(client_frame_buffers.get(client_id, []))
     # Store timestamp if not already stored
     if "timestamp" not in measurement_state:
         measurement_state["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -381,29 +425,24 @@ def save_gif(frames, client_id, timestamp):
         frames_rgb = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
 
         # Increase resolution by resizing frames
-        upscale_factor = 0.4  # Adjust as needed
+        upscale_factor = 2  # Adjust as needed
         frames_rgb = [
             cv2.resize(
                 frame,
                 None,
                 fx=upscale_factor,
                 fy=upscale_factor,
-                interpolation=cv2.INTER_CUBIC,
-            )
-            for frame in frames_rgb
+                interpolation=cv2.INTER_CUBIC
+            ) for frame in frames_rgb
         ]
 
         # Save frames as GIF with increased frame rate
-        imageio.mimsave(gif_path, frames_rgb, format="GIF", fps=FRAME_RATE)
+        imageio.mimsave(gif_path, frames_rgb, format='GIF', fps=FRAME_RATE)
 
         print(f"GIF saved for client {client_id} at {gif_path}")
 
-        # Convert GIF file to BytesIO for Firebase upload
-        with open(gif_path, "rb") as gif_file:
-            gif_bytes = BytesIO(gif_file.read())
-
-        # Save the GIF in Firebase Storage
-        gif_url = saveFile(client_id, "gifs", gif_filename, gif_bytes)
+        # Construct the GIF URL
+        gif_url = f"{BASE_URL}/videos/{gif_filename}"
 
         # Emit event with GIF URL
         socketio.emit(
@@ -420,7 +459,6 @@ def save_gif(frames, client_id, timestamp):
             {"message": "Failed to save GIF"},
             to=client_id,
         )
-
 
 if __name__ == "__main__":
     loadFirebaseFromApp(app)
