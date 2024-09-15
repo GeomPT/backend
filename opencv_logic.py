@@ -3,6 +3,11 @@
 import cv2
 import numpy as np
 import mediapipe as mp
+import warnings
+
+warnings.filterwarnings(
+    "ignore", category=UserWarning, module="google.protobuf.symbol_database"
+)
 
 mp_drawing = mp.solutions.drawing_utils
 
@@ -145,12 +150,13 @@ def drawTextAtPoint(image, text, point):
 
 
 def process_frame(frame, processing_type, pose_instance):
+    angle = None  # Initialize angle to None
     if processing_type not in MODE_TO_LANDMARKS:
         # Default processing: just return the frame with a message
         cv2.putText(
             frame, "Streaming...", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3
         )
-        return frame
+        return frame, angle  # Return angle as None
 
     # Recolor image to RGB
     image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -184,4 +190,4 @@ def process_frame(frame, processing_type, pose_instance):
         # If landmarks are not detected, pass without altering the image
         pass
 
-    return image
+    return image, angle
