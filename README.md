@@ -35,7 +35,7 @@ To run this project locally:
 
 1. Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/geompt.git
+    git clone [https://github.com/yourusername/geompt.git](https://github.com/GeomPT/backend.git)
     ```
 
 2. Create a virtual environment:
