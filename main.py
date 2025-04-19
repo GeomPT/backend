@@ -1,4 +1,4 @@
-from flask import Flask, request, send_from_directory
+from flask import Flask, request, send_from_directory, Response, jsonify
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import cv2
@@ -11,6 +11,9 @@ from collections import deque
 import threading
 from io import BytesIO
 import uuid
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
 from opencv_logic import (
     process_frame as measure_process_frame,
@@ -31,11 +34,36 @@ CORS(
 # socketio cors needed for websocket
 socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000")
 
+# Load environment variables from .env in project root
+dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path=dotenv_path)
+    print("SUCCESS: .env file loaded.")
+else:
+    print(f"ERROR: .env file not found at {dotenv_path}")
+
+# Configure Gemini GenAI and initialize global client
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+gemini_client = None  
+
+if GEMINI_API_KEY:
+    try:
+        # Initialize the client once for the application lifetime
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+        print("SUCCESS: Gemini Client initialized.")
+    except Exception as e:
+        print(f"ERROR: Failed to initialize Gemini Client: {e}")
+        gemini_client = None  
+else:
+    print(
+        "Warning: GEMINI_API_KEY not found in environment variables. Gemini features will be disabled."
+    )
+
 client_processing_options = {}
 client_pose_instances = {}
 client_measurement_state = {}
 client_frame_buffers = {}
-client_user_info = {}  # Stores user_id and workout for each client
+client_user_info = {}  # Stores client_id and workout for each client
 frame_timestamps = {}
 
 USE_COUNTDOWN = True
@@ -54,7 +82,7 @@ POST_FRAME_BUFFER_SIZE = int(POST_MEASUREMENT_SECONDS * FRAME_RATE)
 VIDEO_FOLDER = "videos"
 os.makedirs(VIDEO_FOLDER, exist_ok=True)
 
-# Initialize Firebase
+# Initialize Firebase & all related database api routes
 loadFirebaseFromApp(app)
 db = firestore.client()
 
@@ -69,22 +97,124 @@ def serve_static_file(path):
     return send_from_directory("static", path)
 
 
+@app.route("/api/ask-gemini", methods=["POST"])
+def ask_gemini_api():
+    """
+    Handles POST requests to interact with the Gemini API streaming.
+    Expects JSON body with 'body', 'system' (system instruction),
+    and 'user' (user instruction/prompt prefix) keys.
+    Uses 'gemini-2.5-flash-preview-04-17' with specific generation settings
+    and a limited token output for shorter responses.
+    Streams the response from the model.
+    """
+    # check that our client is configured
+    if not gemini_client:
+        print("Error: Gemini client is not available.")
+        return jsonify({"error": "Gemini client not initialized on server"}), 500
+    
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
+
+    data = request.get_json()
+    body_content = data.get("body")
+    system_instruction = data.get("system")
+    user_instruction = data.get("user")
+
+    if body_content is None or system_instruction is None or user_instruction is None:
+        missing = [k for k in ["body", "system", "user"] if data.get(k) is None]
+        return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+
+    try:
+        generation_config = {
+            "temperature": 0.75,
+            "top_p": 0.95,
+            "top_k": 64,
+            "max_output_tokens": 3000,
+            "response_mime_type": "text/plain",
+            "system_instruction": system_instruction, 
+        }
+
+        model_name = "gemini-2.5-flash-preview-04-17"
+
+        # Combine user instruction prefix and the main body into a single prompt string.
+        prompt_combined = (
+            f"{user_instruction}\n\n{body_content}"
+        )
+
+        # generate_content_stream returns data sequentially as it's generated
+        response_stream = gemini_client.models.generate_content_stream(
+            model=model_name,
+            contents=prompt_combined,
+            config=types.GenerateContentConfig(
+                **generation_config,
+                thinking_config=types.ThinkingConfig(thinking_budget=512),
+            ),
+        )
+
+        # Streaming Response Handling
+        def generate_chunks():
+            last_chunk = None
+            try:
+                for chunk in response_stream:
+                    last_chunk = chunk
+                    # emit any text you got
+                    if hasattr(chunk, "text") and chunk.text:
+                        yield chunk.text
+                    elif hasattr(chunk, "parts"):
+                        for part in chunk.parts:
+                            if hasattr(part, "text") and part.text:
+                                yield part.text
+            finally:
+                # once the stream is done, inspect the last chunk’s metadata
+                if last_chunk and hasattr(last_chunk, "usage_metadata"):
+                    m = last_chunk.usage_metadata
+                    prompt_tokens = m.prompt_token_count
+                    completion_tokens = m.candidates_token_count
+                    total_tokens = m.total_token_count
+
+                    # Rates from Gemini 2.5 Flash (thinking mode)
+                    cost_per_1k_prompt = 0.00015  # USD
+                    cost_per_1k_completion = 0.0035  # USD
+
+                    cost_prompt = (prompt_tokens / 1000) * cost_per_1k_prompt
+                    cost_completion = (completion_tokens / 1000) * cost_per_1k_completion
+                    total_cost = cost_prompt + cost_completion
+
+                    print(f"Prompt tokens:     {prompt_tokens}")
+                    print(f"Completion tokens: {completion_tokens}")
+                    print(f"Total tokens:      {total_tokens}")
+                    print(f"Estimated Total Cost: ${total_cost:.6f}")
+
+        # Return the streaming response using the generator
+        return Response(generate_chunks(), mimetype="text/plain")
+
+    except Exception as e:
+        # Catch errors during API call preparation or execution
+        print(f"Error calling Gemini API via client: {e}")
+
+        # Return a generic server error response to the client
+        error_message = f"Failed to call Gemini API: {str(e)}"
+        status_code = 500
+
+        return jsonify({"error": error_message}), status_code
+
+
 @socketio.on("connect")
 def handle_connect(auth):
     print(f"Client connected: {request.sid}")
     workout = auth.get("workoutName") or "elbow_horizontal"
     print(f"Workout exact name: '{auth.get('workoutName')}'")
 
-    # Extract user_id and workout from auth object
-    user_id = "Bob_8f0c3aae-30ce-4c6d-b6d1-0c3993e1808d"
+    # Extract client_id and workout from auth object
+    client_id = "Bob_8f0c3aae-30ce-4c6d-b6d1-0c3993e1808d"
 
-    if not user_id or not workout:
-        print(f"Missing user_id or workout for client {request.sid}")
-        emit("connection_error", {"message": "Missing user_id or workout"})
+    if not client_id or not workout:
+        print(f"Missing client_id or workout for client {request.sid}")
+        emit("connection_error", {"message": "Missing client_id or workout"})
         return
 
     # Store user info
-    client_user_info[request.sid] = {"user_id": user_id, "workout": workout}
+    client_user_info[request.sid] = {"client_id": client_id, "workout": workout}
 
     # Ensure no pose instance is left open before opening a new one
     if request.sid in client_pose_instances:
@@ -206,14 +336,14 @@ def handle_send_frame(frame_data):
                             measurement_state["measurement_started"] = False
                             save_measurement(
                                 measurement_state,
-                                client_user_info[request.sid]["user_id"],
+                                client_user_info[request.sid]["client_id"],
                             )
                             # Start post-measurement frame collection
                             initiate_post_measurement(request.sid)
                     else:
                         measurement_state["measurement_started"] = False
                         save_measurement(
-                            measurement_state, client_user_info[request.sid]["user_id"]
+                            measurement_state, client_user_info[request.sid]["client_id"]
                         )
                         # Start post-measurement frame collection
                         initiate_post_measurement(request.sid)
@@ -371,20 +501,20 @@ def save_measurement(measurement_state, client_id):
 
 def save_video_to_mp4(frames, user_info, measurement_state):
     """
-    user_info is client_user_id which is ["user_id", "workout"]
+    user_info is client_client_id which is ["client_id", "workout"]
     """
-    user_id, workout = user_info["user_id"], user_info["workout"]
+    client_id, workout = user_info["client_id"], user_info["workout"]
     if not frames:
-        print(f"No frames to save for video for client {user_id}")
+        print(f"No frames to save for video for client {client_id}")
         socketio.emit(
             "video_save_failed",
             {"message": "No frames available to save video"},
-            to=user_id,
+            to=client_id,
         )
         return
 
     timestamp = measurement_state.get("timestamp")
-    video_filename = f"measurement_{timestamp}_{user_id}.mp4"
+    video_filename = f"measurement_{timestamp}_{client_id}.mp4"
     video_path = os.path.join(VIDEO_FOLDER, video_filename)
     try:
         # Increase resolution if needed
@@ -410,14 +540,14 @@ def save_video_to_mp4(frames, user_info, measurement_state):
 
         video_writer.release()
 
-        print(f"MP4 video saved for client {user_id} at {video_path}")
+        print(f"MP4 video saved for client {client_id} at {video_path}")
 
         # Read the video as bytes to upload to Firebase
         with open(video_path, "rb") as video_file:
             video_bytes = BytesIO(video_file.read())
 
         # Save the MP4 video in Firebase Storage
-        video_url = save_file_to_storage(user_id, "video", video_filename, video_bytes)
+        video_url = save_file_to_storage(client_id, "video", video_filename, video_bytes)
 
         # Store video URL in measurement state
         measurement_state["video_url"] = video_url
@@ -434,7 +564,7 @@ def save_video_to_mp4(frames, user_info, measurement_state):
             }
 
             save_measurement_to_firestore(
-                user_id, workout, measurement_id, measurement_data
+                client_id, workout, measurement_id, measurement_data
             )
 
             # Emit event with measurement data
@@ -444,27 +574,27 @@ def save_video_to_mp4(frames, user_info, measurement_state):
                     "message": "Video measurement saved to db",
                     "measurement_data": measurement_data,
                 },
-                to=user_id,
+                to=client_id,
             )
 
-            print(f"Measurement data saved and added to db {user_id}")
+            print(f"Measurement data saved and added to db {client_id}")
 
         else:
-            print(f"No user info found for client {user_id}")
+            print(f"No user info found for client {client_id}")
             socketio.emit(
                 "measurement_failed",
                 {"message": "User information not found"},
-                to=user_id,
+                to=client_id,
             )
 
     except Exception as e:
-        print(f"Failed to save video for client {user_id}: {e}")
+        print(f"Failed to save video for client {client_id}: {e}")
         if os.path.exists(video_path):
             os.remove(video_path)
         socketio.emit(
             "video_save_failed",
             {"message": "Failed to save video"},
-            to=user_id,
+            to=client_id,
         )
 
 

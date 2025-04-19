@@ -6,3 +6,5 @@ angleAPI/__pycache__/
 .DS_Store
 measurements/
 videos/
+.env
+.DS_Store

@@ -65,7 +65,7 @@ def loadFirebaseFromApp(app):
         requestData = request.json
         userId = generateUserId(
             requestData["name"]
-        )  # Fixed typo here (gerneate -> generate)
+        )
         name = requestData["name"]
         role = requestData["role"]
         relatedIds = requestData["relatedIds"]
