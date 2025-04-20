@@ -202,7 +202,7 @@ def ask_gemini_api():
 @socketio.on("connect")
 def handle_connect(auth):
     print(f"Client connected: {request.sid}")
-    workout = auth.get("workoutName") or "elbow_horizontal"
+    workout = auth.get("workoutName") or "elbow-horizontal"
     print(f"Workout exact name: '{auth.get('workoutName')}'")
 
     # Extract client_id and workout from auth object
@@ -337,16 +337,21 @@ def handle_send_frame(frame_data):
                             save_measurement(
                                 measurement_state,
                                 client_user_info[request.sid]["client_id"],
+                                target_sid=request.sid
                             )
                             # Start post-measurement frame collection
                             initiate_post_measurement(request.sid)
                     else:
                         measurement_state["measurement_started"] = False
+                        current_sid = request.sid # Get the SID in this context
+                        print(f"--- Measurement complete logic triggered for SID: {current_sid}") # Add log
                         save_measurement(
-                            measurement_state, client_user_info[request.sid]["client_id"]
+                            measurement_state, 
+                            client_user_info[request.sid]["client_id"], 
+                            current_sid,
                         )
                         # Start post-measurement frame collection
-                        initiate_post_measurement(request.sid)
+                        initiate_post_measurement(current_sid)
                 else:
                     measurement_state["below_threshold_counter"] = 0
             else:
@@ -394,7 +399,7 @@ def handle_send_frame(frame_data):
                 client_measurement_state.pop(request.sid, None)
 
     # Encode frame as JPEG with maximum quality
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
     _, buffer = cv2.imencode(".jpg", processed_frame, encode_param)
     frame_data_encoded = buffer.tobytes()
 
@@ -427,7 +432,7 @@ def handle_begin_measurement():
 
 
 def process_frame(frame, processing_type, pose_instance):
-    if processing_type in ["knee", "elbow", "shoulder", "elbow_horizontal"]:
+    if processing_type in ["knee", "elbow", "shoulder", "elbow-horizontal"]:
         frame, angle, confidence = measure_process_frame(
             frame, processing_type, pose_instance
         )
@@ -447,7 +452,7 @@ def process_frame(frame, processing_type, pose_instance):
     return frame, angle, confidence
 
 
-def save_measurement(measurement_state, client_id):
+def save_measurement(measurement_state, client_id, target_sid):
     max_angle = measurement_state["max_angle"]
     max_angle_frame = measurement_state["max_angle_frame"]
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -461,14 +466,14 @@ def save_measurement(measurement_state, client_id):
         socketio.emit(
             "measurement_failed",
             {"message": "Measurement failed due to low confidence"},
-            to=client_id,
+            to=target_sid,
         )
         return
 
     socketio.emit(
         "measurement_complete",
-        {"message": "Measurement finished, but not saved (important for flash)"},
-        to=client_id,
+        {"message": "Measurement finished, flash should trigger"},
+        to=target_sid,  # using target_sid
     )
     try:
         # Convert image to bytes
@@ -495,7 +500,7 @@ def save_measurement(measurement_state, client_id):
         socketio.emit(
             "measurement_failed",
             {"message": "Failed to save measurement"},
-            to=client_id,
+            to=target_sid,
         )
 
 
@@ -509,7 +514,7 @@ def save_video_to_mp4(frames, user_info, measurement_state):
         socketio.emit(
             "video_save_failed",
             {"message": "No frames available to save video"},
-            to=client_id,
+            to=request.sid,
         )
         return
 

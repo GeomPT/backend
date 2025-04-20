@@ -13,7 +13,7 @@ MODE_TO_LANDMARKS = {
     "knee": ["HIP", "KNEE", "ANKLE"],
     "elbow": ["SHOULDER", "ELBOW", "WRIST"],
     "shoulder": ["ELBOW", "SHOULDER", "HIP"],
-    "elbow_horizontal": ["ELBOW", "WRIST"]  # Only two landmarks; third point is computed
+    "elbow-horizontal": ["ELBOW", "WRIST"]  # Only two landmarks; third point is computed
 }
 
 def setCurrentMode(mode):
@@ -102,7 +102,7 @@ def generateImageAndAngle(image, direction, landmarks, frame):
             image, f"{currentMode.capitalize()} Angle: {int(angle)} deg", positions[1]
         )
 
-    elif currentMode == "elbow_horizontal":
+    elif currentMode == "elbow-horizontal":
         # Get elbow and wrist positions
         elbow = getLandmarkPosition(landmarks, "RIGHT_ELBOW", frame)
         wrist = getLandmarkPosition(landmarks, "RIGHT_WRIST", frame)

@@ -13,7 +13,7 @@ MODE_TO_LANDMARKS = {
     "knee": ["HIP", "KNEE", "ANKLE"],
     "elbow": ["SHOULDER", "ELBOW", "WRIST"],
     "shoulder": ["ELBOW", "SHOULDER", "HIP"],
-    "elbow_horizontal": ["WRIST", "ELBOW"],
+    "elbow-horizontal": ["WRIST", "ELBOW"],
 }
 
 # Boolean to toggle confidence threshold check
@@ -196,7 +196,7 @@ def process_frame(frame, processing_type, pose_instance):
             confidences.append(visibility)
         confidence = min(confidences)  # Use the minimum confidence among landmarks
 
-        if processing_type == "elbow_horizontal":
+        if processing_type == "elbow-horizontal":
             offset = -200
             point_left = [positions[1][0] - offset, positions[1][1]]
             positions.append([point_left[0], point_left[1]])
@@ -226,6 +226,7 @@ def process_frame(frame, processing_type, pose_instance):
             )
     except Exception as e:
         # Landmarks not detected
+        # print("ERROR: Error drawing on frames in opencv_logic.py - ", e)
         cv2.putText(
             image,
             "Please move into frame",

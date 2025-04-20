@@ -47,6 +47,7 @@ def save_measurement_to_firestore(user_id, workout, measurement_id, measurement_
         .collection(workout)
         .document(measurement_id)
     )
+    print(f"save_measurement_to_firestore: Measurement saved to users with {user_id=}, {workout=}, {measurement_id=}")
     doc_ref.set(measurement_data)
 
 
@@ -120,8 +121,9 @@ def loadFirebaseFromApp(app):
             "imageUrl": imageUrl,
             "videoUrl": videoUrl,  # Placeholder for video
         }
+        print(f"added data for {userId=}, {workout=}, {data=}")
 
-        graphDataRef.add(data)
+        doc_ref = graphDataRef.add(data)
         return (
             jsonify({"message": f"Graph data added for {userId} for {workout}"}),
             200,

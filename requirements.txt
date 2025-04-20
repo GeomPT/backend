@@ -74,4 +74,5 @@ urllib3==2.2.3
 Werkzeug==3.0.4
 wsproto==1.2.0
 google-genai
-dotenv
+dotenv==0.9.9
+eventlet==0.39.1
